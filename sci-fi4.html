@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gesture-Controlled Particle System</title>
+  <style>
+    :root { --bg:#050505; --panel:rgba(20,20,25,.78); --accent:#00e5ff; --border:rgba(255,255,255,.12) }
+    * { box-sizing:border-box } body { margin:0; overflow:hidden; background:var(--bg); color:#fff; font:13px Arial,sans-serif }
+    canvas { display:block } #ui { position:fixed; z-index:2; top:20px; left:20px; width:290px; padding:20px; border:1px solid var(--border); border-radius:16px; background:var(--panel); backdrop-filter:blur(12px) }
+    h1 { margin:0 0 18px; padding-bottom:10px; border-bottom:1px solid var(--border); font-size:14px; letter-spacing:2px; text-transform:uppercase }
+    label { display:block; margin:16px 0 8px; color:#999; font-size:11px; font-weight:bold; letter-spacing:.5px }.grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px }
+    button { padding:10px; border:1px solid var(--border); border-radius:8px; background:#ffffff0d; color:#fff; cursor:pointer } button:hover { background:#ffffff26 } button.active { border-color:var(--accent); background:var(--accent); color:#000; font-weight:bold }
+    input[type=range] { width:100% } input[type=color] { width:42px; height:34px; padding:0; border:0; background:none; cursor:pointer } #status { margin-top:16px; color:var(--accent); font-size:11px } #help { margin-top:16px; padding-top:12px; border-top:1px solid var(--border); color:#888; font-size:11px; line-height:1.45 }
+  </style>
+</head>
+<body>
+  <aside id="ui">
+    <h1>Particle Core</h1>
+    <label>MORPH TARGET</label>
+    <div class="grid" id="shapeButtons">
+      <button class="active" data-shape="sphere">Sphere</button><button data-shape="heart">Heart</button>
+      <button data-shape="saturn">Saturn</button><button data-shape="spiral">Galaxy</button>
+      <button data-shape="fireworks">Fireworks</button>
+    </div>
+    <label>PARTICLE COLOR</label><input id="color" type="color" value="#00e5ff">
+    <label>DENSITY &amp; NOISE</label><input id="noise" type="range" min="0" max="2" step=".1" value=".5">
+    <label>INPUT MODE</label><button id="camera" style="width:100%">Disable Camera (Use Mouse)</button>
+    <div id="status">Initializing AI…</div>
+    <div id="help"><b>Gestures:</b> open hand expands; pinch contracts; move hand to rotate. Mouse works when the camera is off.</div>
+    <button id="snapshot" style="width:100%;margin-top:14px">📸 Save Snapshot</button>
+  </aside>
+  <video id="video" playsinline style="display:none"></video>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
+  <script>
+    const count=25000, scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1000);
+    const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true}); camera.position.z=100; renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); document.body.appendChild(renderer.domElement);
+    const positions=new Float32Array(count*3), targets=new Float32Array(count*3), randoms=new Float32Array(count);
+    for(let i=0;i<count;i++){ const j=i*3; positions[j]=(Math.random()-.5)*100; positions[j+1]=(Math.random()-.5)*100; positions[j+2]=(Math.random()-.5)*100; randoms[i]=Math.random() }
+    const geometry=new THREE.BufferGeometry(); geometry.setAttribute('position',new THREE.BufferAttribute(positions,3)); geometry.setAttribute('aRandom',new THREE.BufferAttribute(randoms,1));
+    const material=new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{time:{value:0},expansion:{value:.5},noise:{value:.5},color:{value:new THREE.Color('#00e5ff')}},vertexShader:`uniform float time,expansion,noise; attribute float aRandom; varying float alpha; void main(){vec3 p=position*(.2+expansion); float n=sin(p.x*.08+time)*cos(p.y*.08-time)*noise*5.; p+=vec3(n,sin(time+p.x*.1)*n,cos(time+p.y*.1)*n); vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv; gl_PointSize=(aRandom*3.+2.)*(300./-mv.z); alpha=1.-smoothstep(150.,300.,-mv.z);}`,fragmentShader:`uniform vec3 color; varying float alpha; void main(){float d=length(gl_PointCoord-.5); if(d>.5)discard; gl_FragColor=vec4(color,pow(1.-d*2.,1.5)*alpha);}`});
+    const particles=new THREE.Points(geometry,material); scene.add(particles);
+    const shapes={
+      sphere:()=>{const t=Math.random()*Math.PI*2,p=Math.acos(2*Math.random()-1),r=30+Math.random()*5;return[r*Math.sin(p)*Math.cos(t),r*Math.sin(p)*Math.sin(t),r*Math.cos(p)]},
+      heart:()=>{const t=Math.random()*Math.PI*2,r=Math.sqrt(Math.random()),s=1.5;return[16*Math.sin(t)**3*s*r,(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))*s*r,(Math.random()-.5)*10*r]},
+      saturn:()=>{if(Math.random()>.4){const t=Math.random()*Math.PI*2,r=35+Math.random()*15;return[Math.cos(t)*r,(Math.random()-.5)*2,Math.sin(t)*r]}const t=Math.random()*Math.PI*2,p=Math.acos(2*Math.random()-1);return[20*Math.sin(p)*Math.cos(t),20*Math.sin(p)*Math.sin(t),20*Math.cos(p)]},
+      spiral:()=>{const a=Math.random()*4*Math.PI+Math.floor(Math.random()*3)*Math.PI*2/3,d=Math.random()**2*45;return[Math.cos(a)*d,(Math.random()-.5)*(15-d/5),Math.sin(a)*d]},
+      fireworks:()=>[(Math.random()-.5)*100,(Math.random()-.5)*100,(Math.random()-.5)*100]
+    };
+    function setShape(name){for(let i=0;i<count;i++){const p=shapes[name](),j=i*3;targets[j]=p[0];targets[j+1]=p[1];targets[j+2]=p[2]}} setShape('sphere');
+    const state={camera:true,expansion:.5,rx:0,ry:0}; const video=document.querySelector('#video'), status=document.querySelector('#status'), camButton=document.querySelector('#camera'); let model;
+    async function startCamera(){const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});video.srcObject=stream;await video.play()}
+    async function detect(){if(!state.camera||!model)return;try{const hands=await model.estimateHands(video);if(hands.length){const l=hands[0].landmarks,thumb=l[4],index=l[8],d=Math.hypot(thumb[0]-index[0],thumb[1]-index[1]);state.expansion=THREE.MathUtils.clamp((d-25)/150,0,1);state.ry=-((index[0]/video.videoWidth)-.5)*1.8;state.rx=((index[1]/video.videoHeight)-.5)*1.2}}catch(e){console.warn(e)}requestAnimationFrame(detect)}
+    document.querySelector('#shapeButtons').addEventListener('click',e=>{if(!e.target.dataset.shape)return;document.querySelector('.active').classList.remove('active');e.target.classList.add('active');setShape(e.target.dataset.shape)});
+    document.querySelector('#color').oninput=e=>material.uniforms.color.value.set(e.target.value); document.querySelector('#noise').oninput=e=>material.uniforms.noise.value=+e.target.value;
+    camButton.onclick=async()=>{state.camera=!state.camera;if(state.camera){try{await startCamera();if(model)detect();status.textContent='Tracking active';camButton.textContent='Disable Camera (Use Mouse)'}catch(e){state.camera=false;status.textContent='Camera unavailable. Mouse control active.'}}else{video.srcObject?.getTracks().forEach(t=>t.stop());video.srcObject=null;status.textContent='Mouse control active';camButton.textContent='Enable Camera'}};
+    addEventListener('pointermove',e=>{if(!state.camera){state.ry=(e.clientX/innerWidth-.5)*1.8;state.rx=(e.clientY/innerHeight-.5)*1.2;state.expansion=THREE.MathUtils.clamp(1-e.clientY/innerHeight,.1,1)}});
+    document.querySelector('#snapshot').onclick=()=>{renderer.render(scene,camera);const a=document.createElement('a');a.href=renderer.domElement.toDataURL('image/png');a.download='particle-core.png';a.click()};
+    addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+    function animate(t=0){requestAnimationFrame(animate);for(let i=0;i<positions.length;i++)positions[i]+=(targets[i]-positions[i])*.055;geometry.attributes.position.needsUpdate=true;particles.rotation.x=THREE.MathUtils.lerp(particles.rotation.x,state.rx,.06);particles.rotation.y=THREE.MathUtils.lerp(particles.rotation.y,state.ry+t*.00008,.06);material.uniforms.time.value=t*.001;material.uniforms.expansion.value=THREE.MathUtils.lerp(material.uniforms.expansion.value,state.expansion,.08);renderer.render(scene,camera)}
+    (async()=>{try{await startCamera();model=await handpose.load();status.textContent='Tracking active';detect()}catch(e){state.camera=false;camButton.textContent='Enable Camera';status.textContent='Camera/AI unavailable. Mouse control active.'}animate()})();
+  </script>
+</body>
+</html>
